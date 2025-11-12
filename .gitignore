@@ -1,0 +1,45 @@
+# Django
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+venv/
+
+# Database
+*.sqlite3
+*.db
+
+# Static files
+/staticfiles/
+/media/
+
+# IDE
+.vscode/
+
+# Logs
+*.log
+logs/
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.cache
+
+# pyenv
+.python-version
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Setuptools distribution folder.
+/dist/
+
+# PyPI
+*.egg-info/
+build/
