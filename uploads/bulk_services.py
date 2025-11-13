@@ -1,44 +1,71 @@
 import pandas as pd
 import logging
-from django.db import transaction, connection
-from products.models import Product
+from django.db import connection
+
 from uploads.models import ImportBatch
 import time
 
+
 logger = logging.getLogger(__name__)
 
-class BulkCSVProcessor:
+class UltraFastCSVProcessor:
     
-    def __init__(self):
-        self.batch_size = 5000
+    def _init_(self):
+        self.batch_size = 10000
     
-    def process_large_csv(self, file_path, batch_id, chunk_size=10000):
-        """Optimized processing for very large files"""
+    def process_large_csv(self, file_path, batch_id, chunk_size=50000):
+        """Ultra-fast processing using direct SQL"""
         batch = ImportBatch.objects.get(id=batch_id)
         batch.status = 'processing'
         batch.save()
         
+        start_time = time.time()
         total_processed = 0
         total_successful = 0
         errors = []
         
         try:
-            for chunk_number, chunk in enumerate(pd.read_csv(file_path, chunksize=chunk_size)):
-                chunk_successful, chunk_errors = self._process_chunk_bulk(chunk, batch_id)
+            # Optimized pandas reading
+            dtype_spec = {
+                'sku': 'string', 'SKU': 'string', 'product_sku': 'string',
+                'name': 'string', 'Name': 'string', 'product_name': 'string',
+                'description': 'string', 'Description': 'string',
+                'item_sku': 'string', 'code': 'string', 'id': 'string',
+                'item_name': 'string', 'title': 'string', 'product': 'string',
+                'desc': 'string', 'product_description': 'string'
+            }
+            
+            for chunk_number, chunk in enumerate(
+                pd.read_csv(
+                    file_path, 
+                    chunksize=chunk_size, 
+                    dtype=dtype_spec, 
+                    low_memory=False,
+                    usecols=lambda x: any(keyword in x.lower() for keyword in 
+                                        ['sku', 'name', 'description', 'product', 'item', 'code', 'id', 'title', 'desc'])
+                )
+            ):
+                logger.info(f"Processing chunk {chunk_number} with {len(chunk)} records")
+                
+                chunk_successful, chunk_errors = self._process_chunk_direct_sql(chunk)
                 
                 total_successful += chunk_successful
                 total_processed += len(chunk)
                 errors.extend(chunk_errors)
                 
-                # Update progress less frequently for better performance
-                if chunk_number % 10 == 0:  # Update every 10 chunks
-                    self._update_batch_progress(batch, total_processed, total_successful, len(errors))
+                # Update progress every chunk for large files
+                batch.processed_records = total_processed
+                batch.successful_records = total_successful
+                batch.failed_records = len(errors)
+                batch.save(update_fields=['processed_records', 'successful_records', 'failed_records'])
                 
-                logger.info(f"Processed chunk {chunk_number}: {len(chunk)} records")
+                logger.info(f"Chunk {chunk_number} completed: {chunk_successful} successful, {len(chunk_errors)} errors")
             
             # Final update
-            self._update_batch_progress(batch, total_processed, total_successful, len(errors))
+            batch_time = time.time() - start_time
             batch.mark_completed()
+            
+            logger.info(f"Total processing time: {batch_time:.2f} seconds for {total_processed} records")
             
             return total_successful, len(errors), errors
             
@@ -47,42 +74,16 @@ class BulkCSVProcessor:
             batch.mark_failed(str(e))
             raise
     
-    def _process_chunk_bulk(self, chunk, batch_id):
-        """Process chunk using bulk operations"""
-        products_to_create = []
-        products_to_update = []
+    def _process_chunk_direct_sql(self, chunk):
+        """Use raw SQL for maximum performance"""
         errors = []
+        records = []
         
-        # Get existing SKUs for this chunk
-        skus_in_chunk = []
-        for _, row in chunk.iterrows():
-            try:
-                product_data = self._map_row_to_product(row)
-                skus_in_chunk.append(product_data['sku'])
-            except Exception as e:
-                errors.append({'sku': 'Unknown', 'error': str(e)})
-        
-        # Fetch existing products in bulk
-        existing_products = Product.objects.filter(sku__in=skus_in_chunk)
-        existing_sku_map = {product.sku.upper(): product for product in existing_products}
-        
-        # Prepare bulk operations
+        # Fast extraction
         for index, row in chunk.iterrows():
             try:
-                product_data = self._map_row_to_product(row)
-                sku = product_data['sku']
-                
-                if sku in existing_sku_map:
-                    # Update existing
-                    existing_product = existing_sku_map[sku]
-                    existing_product.name = product_data['name']
-                    existing_product.description = product_data['description']
-                    existing_product.is_active = product_data['is_active']
-                    products_to_update.append(existing_product)
-                else:
-                    # Create new
-                    products_to_create.append(Product(**product_data))
-                    
+                sku, name, description = self._ultra_fast_extract_fields(row)
+                records.append((sku, name, description))
             except Exception as e:
                 errors.append({
                     'row': index + 2,
@@ -90,58 +91,102 @@ class BulkCSVProcessor:
                     'error': str(e)
                 })
         
-        # Execute bulk operations
-        with transaction.atomic():
-            if products_to_create:
-                Product.objects.bulk_create(products_to_create, batch_size=self.batch_size)
-            
-            if products_to_update:
-                Product.objects.bulk_update(
-                    products_to_update, 
-                    ['name', 'description', 'is_active'], 
-                    batch_size=self.batch_size
-                )
+        if not records:
+            return 0, errors
         
-        successful = len(products_to_create) + len(products_to_update)
+        # Use bulk SQL operations
+        successful = self._bulk_upsert_postgresql(records) if connection.vendor == 'postgresql' else self._bulk_upsert_sqlite(records)
+        
         return successful, errors
     
-    def _map_row_to_product(self, row):
-        """Optimized row mapping"""
-        row_dict = row.where(pd.notna(row), None).to_dict()
+    def _ultra_fast_extract_fields(self, row):
+        """Ultra-fast field extraction"""
+        row_dict = dict(row.items())
         
-        # Fast SKU extraction
+        # SKU extraction - single pass
         sku = None
-        for field in ['sku', 'SKU', 'product_sku']:
-            if field in row_dict and row_dict[field]:
-                sku = str(row_dict[field]).strip().upper()
-                break
+        for field, value in row_dict.items():
+            if value is not None and any(keyword in field.lower() for keyword in ['sku', 'code', 'id']):
+                sku = str(value).strip().upper()
+                if sku and sku != 'NAN':
+                    break
         
         if not sku:
-            raise ValueError("No SKU found")
+            raise ValueError("No valid SKU found")
         
-        # Fast name extraction
-        name = "Unknown"
-        for field in ['name', 'Name', 'product_name']:
-            if field in row_dict and row_dict[field]:
-                name = str(row_dict[field]).strip()[:255]
-                break
+        # Name extraction
+        name = f"Product {sku}"  # Default
+        for field, value in row_dict.items():
+            if value is not None and any(keyword in field.lower() for keyword in ['name', 'title', 'product']):
+                name_val = str(value).strip()
+                if name_val and name_val != 'NAN':
+                    name = name_val[:255]
+                    break
         
+        # Description extraction
         description = ""
-        for field in ['description', 'Description']:
-            if field in row_dict and row_dict[field]:
-                description = str(row_dict[field]).strip()
-                break
+        for field, value in row_dict.items():
+            if value is not None and any(keyword in field.lower() for keyword in ['description', 'desc']):
+                desc_val = str(value).strip()
+                if desc_val and desc_val != 'NAN':
+                    description = desc_val
+                    break
         
-        return {
-            'sku': sku,
-            'name': name,
-            'description': description,
-            'is_active': True
-        }
+        return sku, name, description
     
-    def _update_batch_progress(self, batch, processed, successful, failed_count):
-        """Update batch progress without frequent saves"""
-        batch.processed_records = processed
-        batch.successful_records = successful
-        batch.failed_records = failed_count
-        batch.save(update_fields=['processed_records', 'successful_records', 'failed_records'])
+    def _bulk_upsert_postgresql(self, records):
+        """PostgreSQL-specific bulk UPSERT"""
+        from django.db import connection
+        
+        with connection.cursor() as cursor:
+            # Create temp table
+            cursor.execute("""
+                CREATE TEMPORARY TABLE temp_products_upsert (
+                    sku VARCHAR(255) PRIMARY KEY,
+                    name VARCHAR(255),
+                    description TEXT
+                ) ON COMMIT DROP
+            """)
+            
+            # Bulk insert into temp table
+            cursor.executemany(
+                "INSERT INTO temp_products_upsert (sku, name, description) VALUES (%s, %s, %s)",
+                records
+            )
+            
+            # UPSERT from temp table
+            cursor.execute("""
+                INSERT INTO products_product (sku, name, description, is_active, created_at, updated_at)
+                SELECT sku, name, description, true, NOW(), NOW()
+                FROM temp_products_upsert
+                ON CONFLICT (sku) 
+                DO UPDATE SET 
+                    name = EXCLUDED.name,
+                    description = EXCLUDED.description,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = NOW()
+            """)
+            
+            return cursor.rowcount
+    
+    def _bulk_upsert_sqlite(self, records):
+        """SQLite-specific bulk operations"""
+        from django.db import connection
+        
+        with connection.cursor() as cursor:
+            # For SQLite, use INSERT OR REPLACE
+            placeholders = ','.join(['?'] * 6)
+            sql = f"""
+                INSERT OR REPLACE INTO products_product 
+                (sku, name, description, is_active, created_at, updated_at)
+                VALUES ({placeholders})
+            """
+            
+            # Prepare records with all required fields
+            final_records = []
+            for sku, name, description in records:
+                final_records.append((sku, name, description, True, 'NOW', 'NOW'))
+            
+            cursor.executemany(sql, final_records)
+            return len(final_records)
+        

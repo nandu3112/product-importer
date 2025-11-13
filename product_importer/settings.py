@@ -76,14 +76,16 @@ CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = 'UTC'
 
-CELERY_TASK_TIME_LIMIT = 60 * 60  # 1 hour for large files
-CELERY_TASK_SOFT_TIME_LIMIT = 55 * 60  # 55 minutes
-CELERY_WORKER_MAX_TASKS_PER_CHILD = 10  # Restart worker after 10 tasks to prevent memory leaks
-CELERY_WORKER_MAX_MEMORY_PER_CHILD = 300000  # 300MB per worker
+# Performance optimizations for large file processing
+DATA_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024 * 1024  # 1GB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 * 1024 * 1024  # 1GB
 
-# For large file processing
-DATA_UPLOAD_MAX_MEMORY_SIZE = 500 * 1024 * 1024  # 500MB
-FILE_UPLOAD_MAX_MEMORY_SIZE = 500 * 1024 * 1024  # 500MB
+# Celery optimizations for large files
+CELERY_TASK_TIME_LIMIT = 30 * 60  # 30 minutes
+CELERY_TASK_SOFT_TIME_LIMIT = 25 * 60  # 25 minutes
+CELERY_WORKER_MAX_MEMORY_PER_CHILD = 500000  # 500MB
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
 
 ROOT_URLCONF = 'product_importer.urls'
 
