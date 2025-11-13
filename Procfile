@@ -1,0 +1,1 @@
+web: gunicorn product_importer.wsgi:application --log-file -

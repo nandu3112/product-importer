@@ -2,7 +2,7 @@ import json
 import hmac
 import hashlib
 import time
-from django.conf import settings
+
 from django.utils import timezone
 from celery import shared_task
 import logging

@@ -1,0 +1,9 @@
+Django==5.2.8
+psutil
+chardet
+pandas
+channels
+celery
+django-celery-results
+redis
+gunicorn

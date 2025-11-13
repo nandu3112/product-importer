@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 
 class BulkCSVProcessor:
     
-    def _init_(self):
-        self.batch_size = 5000  # Increased from 1000
+    def __init__(self):
+        self.batch_size = 5000
     
     def process_large_csv(self, file_path, batch_id, chunk_size=10000):
         """Optimized processing for very large files"""
