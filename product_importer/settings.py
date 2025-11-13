@@ -37,10 +37,25 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'django_celery_results',
+    'channels',
     'products',
     'uploads',
     'webhooks',
 ]
+
+ASGI_APPLICATION = 'product_importer.asgi.application'
+
+# Channel layers configuration (using Redis)
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            "hosts": [('127.0.0.1', 6379)],
+        },
+    },
+}
+
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -51,6 +66,22 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
+
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'django-db'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = 'UTC'
+
+CELERY_TASK_TIME_LIMIT = 60 * 60  # 1 hour for large files
+CELERY_TASK_SOFT_TIME_LIMIT = 55 * 60  # 55 minutes
+CELERY_WORKER_MAX_TASKS_PER_CHILD = 10  # Restart worker after 10 tasks to prevent memory leaks
+CELERY_WORKER_MAX_MEMORY_PER_CHILD = 300000  # 300MB per worker
+
+# For large file processing
+DATA_UPLOAD_MAX_MEMORY_SIZE = 500 * 1024 * 1024  # 500MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = 500 * 1024 * 1024  # 500MB
 
 ROOT_URLCONF = 'product_importer.urls'
 

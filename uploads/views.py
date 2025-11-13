@@ -4,62 +4,58 @@ from django.shortcuts import render, redirect
 from django.contrib import messages
 from django.http import JsonResponse
 import os
-import pandas as pd
 from django.core.files.storage import default_storage
 
-from .services import CSVFileUpload
+from .services import CSVUploadService
 from .models import ImportBatch
 
 def upload_csv(request):
     """Handle CSV file upload"""
     if request.method == 'POST' and request.FILES.get('csv_file'):
         csv_file = request.FILES['csv_file']
-    
+        
+        # Validate file type
         if not csv_file.name.lower().endswith('.csv'):
             messages.error(request, 'Please upload a CSV file')
             return redirect('upload-csv')
-    
+        
+        # Save file temporarily
         temp_path = default_storage.save(f'temp/{csv_file.name}', csv_file)
         full_path = default_storage.path(temp_path)
         
         try:
-            upload_service = CSVFileUpload()
-            is_valid, message = upload_service.validate_csv_structure(full_path)
+            # Validate and get exact count
+            upload_service = CSVUploadService()
+            is_valid, message, exact_count = upload_service.validate_and_count_records(full_path)
             
             if not is_valid:
                 messages.error(request, message)
                 default_storage.delete(temp_path)
                 return redirect('upload-csv')
             
-            # Count total records (excluding header)
-            encoding = upload_service.detect_encoding(full_path)
-            df = pd.read_csv(full_path, encoding=encoding)
-            total_records = len(df)
+            if exact_count == 0:
+                messages.error(request, 'File appears to be empty or cannot be read')
+                default_storage.delete(temp_path)
+                return redirect('upload-csv')
             
-            # Create import batch - pass user only if authenticated
+            # Create import batch with EXACT count
             user = request.user if request.user.is_authenticated else None
             batch = upload_service.create_import_batch(
                 file_name=csv_file.name,
-                total_records=total_records,
+                total_records=exact_count,
                 user=user
             )
             
-            # Process CSV synchronously, make this async later
-            successful, failed, errors = upload_service.process_csv_sync(
-                full_path, batch.id, user
-            )
+            # Start processing
+            task_id = upload_service.process_csv(full_path, batch.id, user)
             
             messages.success(
                 request, 
-                f'Successfully processed {successful} products! {failed} failed.'
+                f'File uploaded successfully! Processing {exact_count:,} records in the background.'
             )
             
-            if errors:
-                error_messages = [f"Row {e['row']} (SKU: {e['sku']}): {e['error']}" for e in errors[:5]]
-                for error_msg in error_messages:
-                    messages.warning(request, error_msg)
-                if len(errors) > 5:
-                    messages.info(request, f"... and {len(errors) - 5} more errors")
+            # REDIRECT TO STATUS PAGE
+            return redirect('upload-status', batch_id=batch.id)
             
         except Exception as e:
             messages.error(request, f'Upload failed: {str(e)}')
@@ -77,17 +73,31 @@ def upload_history(request):
 
 def upload_status(request, batch_id):
     """Check upload processing status"""
-    batch = ImportBatch.objects.get(id=batch_id)
-    
-    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
-        return JsonResponse({
-            'batch_id': batch.id,
-            'status': batch.status,
-            'processed': batch.processed_records,
-            'total': batch.total_records,
-            'successful': batch.successful_records,
-            'failed': batch.failed_records,
-            'progress': int((batch.processed_records / batch.total_records) * 100) if batch.total_records > 0 else 0
+    try:
+        batch = ImportBatch.objects.get(id=batch_id)
+        
+        # Calculate progress correctly
+        progress = 0
+        if batch.total_records > 0:
+            progress = int((batch.processed_records / batch.total_records) * 100)
+        
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return JsonResponse({
+                'batch_id': batch.id,
+                'status': batch.status,
+                'processed': batch.processed_records,
+                'total': batch.total_records,
+                'successful': batch.successful_records,
+                'failed': batch.failed_records,
+                'progress': progress
+            })
+        
+        return render(request, 'uploads/status.html', {
+            'batch': batch,
+            'progress': progress
         })
+        
+    except ImportBatch.DoesNotExist:
+        messages.error(request, 'Upload batch not found')
+        return redirect('upload-history')
     
-    return render(request, 'uploads/status.html', {'batch': batch})

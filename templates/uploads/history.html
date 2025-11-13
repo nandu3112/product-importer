@@ -41,9 +41,9 @@
                             {{ batch.status|title }}
                         </span>
                     </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 batch-progress">
                         {{ batch.processed_records }} / {{ batch.total_records }}
-                        ({{ batch.processed_records|default:0|floatformat:0 }}%)
+                        ({% widthratio batch.processed_records batch.total_records 100 %}%)
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {% if batch.status == 'completed' %}

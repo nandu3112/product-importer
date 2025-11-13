@@ -12,22 +12,28 @@ class ImportBatch(models.Model):
         ('failed', 'Failed'),
     ]
     
-    file_name = models.CharField(max_length=255)
+    file_name = models.CharField(max_length=255, db_index=True)
     total_records = models.IntegerField()
     processed_records = models.IntegerField(default=0)
     successful_records = models.IntegerField(default=0)
     failed_records = models.IntegerField(default=0)
-    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', db_index=True)
     errors = models.JSONField(default=list, blank=True)
     created_by = models.ForeignKey(
         User, 
         on_delete=models.SET_NULL, 
         null=True, 
-        blank=True,
-        help_text="User who uploaded the file (optional)"
+        blank=True
     )
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     completed_at = models.DateTimeField(null=True, blank=True)
+    
+    class Meta:
+        indexes = [
+            models.Index(fields=['status', 'created_at']),
+            models.Index(fields=['file_name']),
+        ]
+        ordering = ['-created_at']
     
     def __str__(self):
         return f"{self.file_name} - {self.status}"
@@ -41,3 +47,7 @@ class ImportBatch(models.Model):
         self.status = 'failed'
         self.errors.append(error_message)
         self.save()
+    
+    def get_absolute_url(self):
+        from django.urls import reverse
+        return reverse('upload-status', kwargs={'batch_id': self.id})

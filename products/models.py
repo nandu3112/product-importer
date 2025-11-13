@@ -1,6 +1,8 @@
 from django.db import models
 
 # Create your models here.
+from django.contrib.postgres.indexes import HashIndex  # If using PostgreSQL
+
 class Product(models.Model):
     sku = models.CharField(
         max_length=100, 
@@ -15,6 +17,13 @@ class Product(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
     class Meta:
+        indexes = [
+            models.Index(fields=['sku']),
+            models.Index(fields=['is_active']),
+            models.Index(fields=['created_at']),
+            # For PostgreSQL, add HashIndex for faster lookups
+            # HashIndex(fields=['sku']),
+        ]
         ordering = ['-created_at']
     
     def __str__(self):

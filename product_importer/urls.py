@@ -23,5 +23,5 @@ urlpatterns = [
     path('', RedirectView.as_view(pattern_name='product-list'), name='home'),
     path('products/', include('products.urls')),
     path('upload/', include('uploads.urls')),
-    # path('webhooks/', include('webhooks.urls')),
+    path('webhooks/', include('webhooks.urls')),
 ]
